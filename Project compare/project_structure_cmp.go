@@ -92,7 +92,7 @@ func cmp(routineID int){
 			}
 			if intersectionLen>1000{
 				score := float64(intersectionLen)/float64(len(TestSet))
-				sscore:=fmt.Sprintf("%.3f", score)
+				sscore:=fmt.Sprintf("%.4f", score)
 				fmt.Println("routine ID: "+strconv.Itoa(routineID) + ", insertersection length:" + sscore)
 			}
 	}
