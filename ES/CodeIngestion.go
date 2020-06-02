@@ -152,7 +152,8 @@ func ingest(){
 		}
 	}
 }
-func SearchDoc(filePath string, fileName string, fileType string){
+//SearchDoc is to ...
+func SearchDoc(filePath string, fileName string, fileType string) (float64, string){
 	doc, err := ioutil.ReadFile(filePath+fileName)
 	if err != nil{
 		panic(err)
@@ -172,7 +173,9 @@ func SearchDoc(filePath string, fileName string, fileType string){
 	}
 	for _,res := range result.Hits.Hits{
 		fmt.Println(*res.Score,res.Id)
+		return *res.Score,res.Id
 	}
+	return 0.0, ""
 
 }
 
@@ -203,18 +206,59 @@ func SearchDocBulk(fileNum int, topNum int){
 		fmt.Println("Retriving file error from db: ",err)
 		panic(err)
 	} else {
-		sTime := time.Millisecond
 		for rows.Next(){
 			rows.Scan(&fileName, &filePath, &fileType)
 			SearchDoc(RootPath+filePath,fileName,fileType)
 		}
-		eTime := time.Millisecond
-		fmt.Println("Time used:", eTime-sTime)
+	}
+}
+//global vars of go routines
+const RN = 100
+var fileCh = make(chan myFile, 150)
+var syncCh = make(chan bool, RN)
+//
+func MultiRoutine(fileNum int){
+	for i:=0;i<=RN;i++{
+		go Search()
+	}
+	sql := "select distinct id as name,substring(path,1,15) as path,type from t_file,t_file_in_project where id=fileid limit "+ strconv.Itoa(fileNum)
+	rows, err := dbCon.Query(sql)
+	var fileName string
+	var filePath string
+	var fileType string
+	if err!=nil{
+		fmt.Println("Retriving file error from db: ",err)
+		panic(err)
+	} else {
+		for rows.Next(){
+			rows.Scan(&fileName, &filePath, &fileType)
+			file :=myFile{path:RootPath+filePath,name:fileName,lang:fileType}
+			fileCh<-file
+		}
+		close(fileCh)
+	}
+	for i:=0;i<=RN;i++{
+		<-syncCh
+	}
+}
+//Search is to search the files in batch
+func Search(){
+	for {
+		file, ok := <- fileCh
+		if !ok{
+			syncCh <- false
+			break
+		}
+		SearchDoc(file.path,file.name,file.lang)
 	}
 }
 func main(){
 	initialize()
 	// createAllIndexes()
 	// ingest()	
-	SearchDocBulk(10000,5)
+	//SearchDocBulk(1000,5)
+	stime := time.Now()
+	MultiRoutine(1000)
+	etime := time.Now()
+	fmt.Println(etime.Sub(stime))
 }
