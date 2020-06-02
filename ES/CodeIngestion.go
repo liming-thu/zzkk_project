@@ -2,16 +2,19 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/olivere/elastic"
+	"gopkg.in/olivere/elastic.v6"
 	_"github.com/go-sql-driver/mysql"
 	"database/sql"
 	"strings"
 	"io/ioutil"
+	"encoding/json"
+	"strconv"
+	"time"
 )
-//CodeDoc is the struct of a source code document structure
-type CodeDoc struct{
-	code string `json: "code"`
-	size int `json: "size"`
+//SrcCodeDoc is the struct of a source code document structure
+type SrcCodeDoc struct{
+	Code string `json: "code"`
+	Size int `json: "size"`
 }
 type myFile struct{
 	path string
@@ -21,38 +24,41 @@ type myFile struct{
 var RootPath="/home/liming/xbc_file_repos/"
 var conStr = "root:liming@tcp(localhost:3306)/zzkk_lite"
 var dbCon *sql.DB
-func initDB(){
+var client *elastic.Client
+var bulkSize = 1000
+const url = "http://localhost:9200"
+
+func initialize(){
 	var err error
 	dbCon, err = sql.Open("mysql", conStr)
 	if err != nil{
-		fmt.Println("Connecting to mysql failed: ",err)
-	}
-}
-const mapping = `{
-    "mappings": {
-		"type_name":{
-        "properties": {
-            "code": {
-                "type": "text"
-            }
-		}
-	}
-    }
-}`
-
-const url = "http://localhost:9200"
-func createIndex(indexName string){
-	ctx := context.Background()
-	client, err:= elastic.NewClient(elastic.SetURL(url))
-	if err != nil {
 		panic(err)
 	}
-	exists, err := client.IndexExists(indexName).Do(ctx)
+	client, err = elastic.NewClient()
+	if err!=nil{
+		panic(err)
+	}
+}
+const mapping =`{"mappings": {
+    "doc": {
+      "properties": {
+        "Code": {
+          "type": "text",
+		  "term_vector": "yes"
+        },
+        "Size": {
+          "type": "long"
+        }
+      }
+    }
+  }}`
+func createIndex(indexName string){
+	exists, err := client.IndexExists(indexName).Do(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	if !exists {
-		_,err := client.CreateIndex(indexName).BodyString(mapping).Do(ctx)
+		_,err := client.CreateIndex(indexName).BodyString(mapping).Do(context.Background())
 		if err != nil {
 			panic(err)
 		} else {
@@ -61,6 +67,8 @@ func createIndex(indexName string){
 	}
 }
 func createAllIndexes(){
+	//first remove all the indexes
+	client.DeleteIndex("*").Do(context.Background())
 	//get all the doc types from mysql
 	sqlStr := "select distinct Type from t_file_in_project"
 	rows, err := dbCon.Query(sqlStr)
@@ -75,72 +83,138 @@ func createAllIndexes(){
 			}
 	}
 }
-func ingest(){
-	//create client in each routine... just for test.
-	ctx := context.Background()
-	client, err:= elastic.NewClient(elastic.SetURL(url))
-	if err != nil {
-		panic(err)
-	}
-	bkRequest := client.Bulk()
-	//begin ingestion
-	for {
-		mf, ok := <- fileCh
-		if !ok{
-			syncCh<-true
-			break
-		}
-		//ingest to es
-		for _,f := range mf{
-			doc,_ := ioutil.ReadFile(f.path+f.name)
-			indexReq := elastic.NewBulkIndexRequest().Index(f.lang).Id(f.name).Doc(string(doc))
-			bkRequest = bkRequest.Add(indexReq)
-		}
-		_,err := bkRequest.Refresh("waite_for").Do(ctx)
-		if err!= nil {
+func ingetSingle(filePath string, fileName string, fileType string){
+	src,err := ioutil.ReadFile(RootPath+filePath+fileName)
+	if err == nil{
+		item := SrcCodeDoc {Code: string(src),Size: len(src)}
+		_,err := client.Index().
+		Index(fileType).
+		Type("doc").
+		Id(fileName).
+		BodyJson(item).
+		Refresh("wait_for").
+		Do(context.Background())
+		if err!=nil{
 			panic(err)
+		} else {
+			fmt.Println(fileName, "ingested")
 		}
-	}
+
+	} else {
+		fmt.Println("Read file error:", RootPath+filePath+fileName)
+		}
 }
-
-var RN = 1
-var bulkSize = 100
-var fileCh = make(chan []myFile, 150)
-var syncCh = make(chan bool, RN)
-
-func main(){
-	initDB()
-	//createAllIndexes()
-	sql := "select id as name,substring(path,1,15) as path,type from t_file,t_file_in_project where id=fileid"	
+func ingest(){
+	bkRequest := client.Bulk()
+	//
+	sql := "select distinct id as name,substring(path,1,15) as path,type from t_file,t_file_in_project where id=fileid"	
 	rows, err := dbCon.Query(sql)
 	var fileName string
 	var filePath string
 	var fileType string
 	if err!=nil{
 		fmt.Println("Retriving file error from db: ",err)
+		panic(err)
 	} else {
-		start ingest routine
-		for i := 0; i<RN; i++{
-			go ingest()
-		}
-		var tmpBulk []myFile
+		i := 0
 		for rows.Next(){
-			rows.Scan(&fileName, &filePath, &fileType)
-			if len(tmpBulk) < bulkSize {
-				tmpBulk = append(tmpBulk, myFile{path:filePath,name:fileName,lang:fileType})
-			} else {
-				tmpBulk = nil
+			rows.Scan(&fileName, &filePath, &fileType)			
+			if i<bulkSize {
+				src,err := ioutil.ReadFile(RootPath+filePath+fileName)
+				if err == nil{
+					item := SrcCodeDoc {Code: string(src),Size: len(src)}
+					indexReq := elastic.NewBulkIndexRequest().
+					Index(fileType).
+					Type("doc").
+					Id(fileName).
+					Doc(item)
+					bkRequest = bkRequest.Add(indexReq)
+					i++
+				} else {
+					fmt.Println("Read file error:", RootPath+filePath+fileName)
+				}
+			}else{
+				_,err := bkRequest.Do(context.Background())
+				if err!= nil {
+					panic(err)
+				}
+				if bkRequest.NumberOfActions() == 0{
+					i = 0
+					fmt.Println(bulkSize," documents ingested")
+				}
 			}
 		}
-		//send the last items to channel
-		if len(tmpBulk)>0{
-			fileCh <- tmpBulk
+		if bkRequest.NumberOfActions()>0{
+			_,err := bkRequest.Do(context.Background())
+			if err!= nil {
+				panic(err)
+			}
 		}
-		close(fileCh)
-		//wait till all the routines completed
-		for i := 1; i<RN; i++ {
-			<-syncCh
-		}
-	
 	}
+}
+func SearchDoc(filePath string, fileName string, fileType string){
+	doc, err := ioutil.ReadFile(filePath+fileName)
+	if err != nil{
+		panic(err)
+	}
+	testDoc := string(doc)
+
+	mlt := elastic.NewMoreLikeThisQuery().Field("Code").LikeText(testDoc)
+	result, err := client.Search().
+	Index(fileType).
+	Query(mlt).
+	From(0).
+	Size(10).
+	Pretty(true).
+	Do(context.Background())
+	if err!=nil{
+		panic(err)
+	}
+	for _,res := range result.Hits.Hits{
+		fmt.Println(*res.Score,res.Id)
+	}
+
+}
+
+//GetDocById is the function to get the src code document by its file ID.
+func GetDocById(id string) (string, int){
+	result, err := client.Get().Index("haml").Id(id).Do(context.Background())
+	if err != nil{
+		fmt.Println(err)
+	}
+	if result.Found {
+		fmt.Println(result.Id,result.Version,result.Index,result.Type)
+		var item SrcCodeDoc
+		buf,_:= result.Source.MarshalJSON()
+		json.Unmarshal(buf, &item)
+		return item.Code, item.Size
+	}
+	return "NULL", 0
+}
+
+//SearchDocBulk used to search a batch of files
+func SearchDocBulk(fileNum int, topNum int){
+	sql := "select distinct id as name,substring(path,1,15) as path,type from t_file,t_file_in_project where id=fileid limit "+ strconv.Itoa(fileNum)
+	rows, err := dbCon.Query(sql)
+	var fileName string
+	var filePath string
+	var fileType string
+	if err!=nil{
+		fmt.Println("Retriving file error from db: ",err)
+		panic(err)
+	} else {
+		sTime := time.Millisecond
+		for rows.Next(){
+			rows.Scan(&fileName, &filePath, &fileType)
+			SearchDoc(RootPath+filePath,fileName,fileType)
+		}
+		eTime := time.Millisecond
+		fmt.Println("Time used:", eTime-sTime)
+	}
+}
+func main(){
+	initialize()
+	// createAllIndexes()
+	// ingest()	
+	SearchDocBulk(10000,5)
 }
