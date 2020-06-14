@@ -99,7 +99,7 @@ var TestFileLshMap = make(map[string]map[string]map[string]bool)
 //GetTestFileLsh is the function to get all the files and lsh to be tested.
 func GetTestFileLsh(DbCon *sql.DB){
 	//ID, HashTypeId, Value
-	sql := "select test_lsh.* from test_lsh, test_file_sha_missed tfsm where tfsm.id = test_lsh.fileid"
+	sql := "select select test_lsh.FileId,test_lsh.HashTypeId,test_lsh.Value from test_lsh, test_file_sha_missed tfsm where tfsm.id = test_lsh.fileid"
 	rows, err := DbCon.Query(sql)
 	if err!=nil{
 		fmt.Println("Retrieving RefProjectId error: ",err)
@@ -229,10 +229,6 @@ func CmpTestFromProject(DbCon *sql.DB){
 	}
 
 	//fmt.Println("TIME USED (ms): "+ strconv.FormatInt(time.Since(startTime).Milliseconds(),10))
-}
-//GetShaMissedFileFromDb is to get all the test file that missed in matching sha-1
-func GetShaMissedFileFromDb(DbCon *sql.DB){
-
 }
 
 //LshResult is ...

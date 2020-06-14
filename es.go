@@ -80,7 +80,7 @@ func ingetSingle(filePath string, fileName string, fileType string, EsClient *el
 func ingest(EsClient *elastic.Client, DbCon *sql.DB){
 	bkRequest := EsClient.Bulk()
 	//
-	sql := "select distinct id as name,substring(path,1,15) as path,type from t_file,t_file_in_project where id=fileid"	
+	sql := "select distinct id as name,path,type from t_file,t_file_in_project where id=fileid and t_file.linenumber>0"	
 	rows, err := DbCon.Query(sql)
 	var fileName string
 	var filePath string
@@ -91,27 +91,28 @@ func ingest(EsClient *elastic.Client, DbCon *sql.DB){
 	} else {
 		i := 0
 		for rows.Next(){
-			rows.Scan(&fileName, &filePath, &fileType)			
-			if i<EsIngestBulkSize {
-				src,err := ioutil.ReadFile(RootPath+filePath+fileName)
-				if err == nil{
-					item := SrcCodeDoc {Code: string(src),Size: len(src)}
-					indexReq := elastic.NewBulkIndexRequest().
-					Index(fileType).
-					Type("doc").
-					Id(fileName).
-					Doc(item)
-					bkRequest = bkRequest.Add(indexReq)
-					i++
-				} else {
-					fmt.Println("Read file error:", RootPath+filePath+fileName)
-				}
-			}else{
+			rows.Scan(&fileName, &filePath, &fileType)
+			src,err := ioutil.ReadFile(RootPath+filePath)
+			if err == nil{
+				item := SrcCodeDoc {Code: string(src),Size: len(src)}
+				indexReq := elastic.NewBulkIndexRequest().
+				Index(fileType).
+				Type("doc").
+				Id(fileName).
+				Version(1).//external version is used to control the duplication of files
+				VersionType("external").//使用外部版本号是为了解决多次插入同一文件时的重复问题.
+				Doc(item)
+				bkRequest = bkRequest.Add(indexReq)
+				i++
+			} else {
+				fmt.Println("Read file ERROR:", RootPath+filePath)
+			}
+			if i >= EsIngestBulkSize{
 				_,err := bkRequest.Do(context.Background())
 				if err!= nil {
+					fmt.Println("Ingestion error", bkRequest.Pretty)
 					panic(err)
-				}
-				if bkRequest.NumberOfActions() == 0{
+				} else {
 					i = 0
 					fmt.Println(EsIngestBulkSize," documents ingested")
 				}
@@ -154,15 +155,19 @@ func SearchDoc(filePath string, fileName string, fileType string, EsClient *elas
 	return docRes
 
 }
-
+//IsDocExists is ...
+func IsDocExists(id string,filetype string, EsClient *elastic.Client){
+	EsClient.Exists().Id(id)
+}
 //GetDocByID is the function to get the src code document by its file ID.
-func GetDocByID(id string, EsClient *elastic.Client) (string, int){
-	result, err := EsClient.Get().Index("haml").Id(id).Do(context.Background())
+func GetDocByID(id string,filetype string, EsClient *elastic.Client) (string, int){
+	result, err := EsClient.Get().Index(filetype).Id(id).Do(context.Background())
 	if err != nil{
 		fmt.Println(err)
+		return "NULL", 0
 	}
 	if result.Found {
-		fmt.Println(result.Id,result.Version,result.Index,result.Type)
+		fmt.Println(result.Id,*result.Version,result.Index,result.Type)
 		var item SrcCodeDoc
 		buf,_:= result.Source.MarshalJSON()
 		json.Unmarshal(buf, &item)

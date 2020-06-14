@@ -12,10 +12,10 @@ import (
 /////////////////////////GLOBAL VARS//////////////////////////////////
 
 //RootPath is the path all src files stored
-var RootPath="/home/liming/"
+var RootPath="/home/liming/xbc_file_repos/"
 
 //EsURL is the url for es
-var EsURL = "http://localhost:9200"
+var EsURL = "http://192.168.1.127:9200"
 
 //ConStr is the connection string of mysql database
 var ConStr = "root:liming@tcp(localhost:3306)/zzkk_lite"
@@ -84,23 +84,25 @@ func PrintTime(msg string){
 
 func main(){
 
-	RootPath=os.Args[1]
-	_,err := os.Stat(RootPath)
-	if err!=nil{
-		fmt.Println("File path error!")
-		//return
+	if len(os.Args)>1{
+		RootPath=os.Args[1]
+		_,err := os.Stat(RootPath)
+		if err!=nil{
+			fmt.Println("File path error!")
+			return
+		}
 	}
-	
+
 	//DbCon is the connection of mysql
 	DbCon := InitializeDB(ConStr)
 
-	// //EsClient is the client of ES
+	//EsClient is the client of ES
 	EsClient := InitializeES(EsURL)
 
 	ts := time.Now();
 
 	SearchDocMultiRoutine(EsClient,DbCon)//ES Search
-	
+
 	fmt.Println("ES time used:",strconv.FormatInt(time.Since(ts).Milliseconds(),10))
 
 	CmpTestFileLshFromEs(DbCon)// LSH compare

@@ -22,7 +22,7 @@ func ProjectStructureCompare(DbCon *sql.DB){
 	DbCon.QueryRow("select Structure from test_project").Scan(&testStructure)
 
 	for i := 1; i<CPUIntenseRN; i++ {
-		go cmp(i)
+		go CmpStructure(i)
 	}
 
 	for _,str := range strings.FieldsFunc(testStructure,Split){
