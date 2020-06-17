@@ -94,18 +94,23 @@ func main(){
 	}
 
 	//DbCon is the connection of mysql
-	DbCon := InitializeDB(ConStr)
+	// DbCon := InitializeDB(ConStr)
 
-	//EsClient is the client of ES
-	EsClient := InitializeES(EsURL)
+	// //EsClient is the client of ES
+	// EsClient := InitializeES(EsURL)
 
 	ts := time.Now();
 
-	SearchDocMultiRoutine(EsClient,DbCon)//ES Search
+	// SearchDocMultiRoutine(EsClient,DbCon)//ES Search
 
-	fmt.Println("ES time used:",strconv.FormatInt(time.Since(ts).Milliseconds(),10))
+	// fmt.Println("ES time used:",strconv.FormatInt(time.Since(ts).Milliseconds(),10))
 
-	CmpTestFileLshFromEs(DbCon)// LSH compare
+	// CmpTestFileLshFromEs(DbCon)// LSH compare
 
 	fmt.Println("Total time used:",strconv.FormatInt(time.Since(ts).Milliseconds(),10))
+
+
+
+
+	CreateWordReport("report.docx")
 }
