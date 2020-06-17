@@ -136,6 +136,12 @@ func SearchDoc(filePath string, fileName string, fileType string, EsClient *elas
 	}
 	testDoc := string(doc)
 	mlt := elastic.NewMoreLikeThisQuery().Field("Code").LikeText(testDoc)
+	//
+	IndexExists,err := EsClient.IndexExists(fileType).Do(context.Background())
+	if err != nil || !IndexExists{
+		return docRes
+	}
+	//
 	result, err := EsClient.Search().
 	Index(fileType).
 	Query(mlt).
@@ -274,17 +280,19 @@ func SaveEsResultsToDB(DbCon *sql.DB){
 	 }
 
 	 //last results
-	smt = fmt.Sprintf(smt, strings.Join(valueStrings, ","))
-	_,txerr:= tx.Exec(smt, valueArgs...)
-	if txerr!=nil{
-		tx.Rollback()
-		fmt.Println("Save ES search result to Database error!")
-		fmt.Println(txerr)
-		return
+	if len(valueArgs)>0{
+		smt = fmt.Sprintf(smt, strings.Join(valueStrings, ","))
+		_,txerr:= tx.Exec(smt, valueArgs...)
+		if txerr!=nil{
+			tx.Rollback()
+			fmt.Println("Save ES search result to Database error!")
+			fmt.Println(txerr)
+			return
+		}
 	}
 	cmterr:=tx.Commit()
 	if cmterr!=nil{
-		fmt.Println("Save ES search result to Database error!")
+		fmt.Println("Commit ES search result to Database error!")
 		fmt.Println(cmterr)
 	}
 

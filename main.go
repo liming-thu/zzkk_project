@@ -18,7 +18,7 @@ var RootPath="/home/liming/xbc_file_repos/"
 var EsURL = "http://192.168.1.127:9200"
 
 //ConStr is the connection string of mysql database
-var ConStr = "root:liming@tcp(localhost:3306)/zzkk_lite"
+var ConStr = "root:liming@tcp(192.168.1.127:3306)/zzkk_lite"
 
 //CPUIntenseRN is the number of CPU intensivie routines
 var CPUIntenseRN = 128
